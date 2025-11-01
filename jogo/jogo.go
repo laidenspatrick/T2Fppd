@@ -51,10 +51,9 @@ type Jogo struct {
     GameOver       bool 
 }
 
-// Assumindo que essas structs estão definidas em outro lugar (ex: rpcdata.go)
-// type EventoTeclado struct { ... }
-// type Comando struct { ... }
-// type Resposta struct { ... } 
+type EstadoJogador struct {
+    PosX, PosY     int
+}
 
 // ------------------ ELEMENTOS VISUAIS ------------------
 var (
@@ -413,9 +412,8 @@ func comportamentoArmadilha(armadilha *Armadilha, jogo *Jogo) {
 // ------------------ FUNÇÕES CLIENTE MULTIPLAYER ------------------
 
 // loopAtualizacaoCliente é uma goroutine dedicada para buscar periodicamente
-[cite_start]
 func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string) {
-    ticker := time.NewTicker(200 * time.Millisecond) 
+    ticker := time.NewTicker(200 * time.Millisecond)
     defer ticker.Stop()
 
     for range ticker.C {
@@ -428,28 +426,33 @@ func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string)
         if stop {
             return
         }
-        
+
         comando := Comando{
             ClientID: clientID,
-            Acao: "BuscarEstado",
+            Acao:     "BuscarEstado",
         }
         var resposta Resposta
-        
+
         err := clienteRPC.Call("JogoServer.BuscarEstado", comando, &resposta)
         if err != nil {
-            continue 
+            continue
         }
 
         withMapaLock(func() {
-            jogo.StatusMsg = resposta.Mensagem // Atualiza a mensagem de status local
-
-            // Lógica de atualização da posição de outros jogadores no mapa local deve ser implementada aqui
-            // Exemplo:
-            // for id, estado := range resposta.EstadoAtual.Jogadores {
-            //     if id != clientID {
-            //         // Colocar o elemento "Outro Jogador" (um novo Elemento) na posição (estado.X, estado.Y) do mapa
-            //     }
-            // }
+            jogo.StatusMsg = resposta.Mensagem
+            for clienteIDOutro, jogador := range resposta.EstadoAtual.Jogadores {
+                if clienteIDOutro != clientID {
+                    if jogador.PosY >= 0 && jogador.PosY < len(jogo.Mapa) &&
+                        jogador.PosX >= 0 && jogador.PosX < len(jogo.Mapa[jogador.PosY]) {
+                        jogo.Mapa[jogador.PosY][jogador.PosX] = Elemento{
+                            simbolo:  '☺',
+                            cor:      CorAzul,
+                            corFundo: CorPadrao,
+                            tangivel: true,
+                        }
+                    }
+                }
+            }
         })
     }
 }
@@ -479,11 +482,24 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
     case "sair":
         return false
     case "mover":
-        [cite_start]
-        
+        dx, dy := 0, 0
+        switch ev.Tecla {
+        case 'w', 'W':
+            dy = -1
+        case 's', 'S':
+            dy = 1
+        case 'a', 'A':
+            dx = -1
+        case 'd', 'D':
+            dx = 1
+        }
+        nx, ny := jogo.PosX+dx, jogo.PosY+dy
+        if jogoPodeMoverPara(jogo, nx, ny) {
+            jogo.PosX, jogo.PosY = nx, ny
+        }
         comando = Comando{
             ClientID:       clientID,
-            [cite_start]SequenceNumber: sequence, 
+            SequenceNumber: sequence,
             Acao:           "update_position",
         }
     case "interagir":
@@ -498,19 +514,17 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
 
     // 2. Chamada RPC (com reexecução em caso de falha)
     var resposta Resposta
-    [cite_start]
-    for tentativas := 0; tentativas < 3; tentativas++ { 
+    for tentativas := 0; tentativas < 3; tentativas++ {
         err := clienteRPC.Call("JogoServer.ExecutarComando", comando, &resposta)
         if err == nil {
             break
         }
-        [cite_start]
         time.Sleep(100 * time.Millisecond)
     }
 
     if resposta.Sucesso {
         withMapaLock(func() {
-            jogo.StatusMsg = resposta.Mensagem 
+            jogo.StatusMsg = resposta.Mensagem
         })
     }
     return true

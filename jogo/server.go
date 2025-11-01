@@ -12,6 +12,13 @@ import (
 type JogoServer struct {
     estado Jogo
     mu     sync.Mutex 
+    Jogadores map[string]EstadoJogador
+}
+
+type Resposta struct {
+    Sucesso     bool
+    Mensagem    string
+    EstadoAtual Jogo
 }
 
 // NovoJogoServer inicializa o servidor de jogo.
@@ -51,7 +58,7 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
             Mensagem: "Comando já processado (retransmissão detectada).",
             EstadoAtual: s.estado,
         }
-        return nil // Evita reexecução
+        return nil 
     }
 
     // 2. Execução do Comando e Atualização do Estado
@@ -59,7 +66,7 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
     case "register":
         if !existe {
             s.estado.Jogadores[comando.ClientID] = EstadoJogador{
-                X:               1, // Posição inicial
+                X:               1, 
                 Y:               1,
                 Vidas:           3,
                 UltimoComando: comando.SequenceNumber,
