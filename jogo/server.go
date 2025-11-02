@@ -10,21 +10,15 @@ import (
 
 // JogoServer é o tipo que implementa os métodos RPC.
 type JogoServer struct {
-    estado Jogo
+    estado EstadoJogo
     mu     sync.Mutex 
     Jogadores map[string]EstadoJogador
-}
-
-type Resposta struct {
-    Sucesso     bool
-    Mensagem    string
-    EstadoAtual Jogo
 }
 
 // NovoJogoServer inicializa o servidor de jogo.
 func NovoJogoServer() *JogoServer {
     return &JogoServer{
-        estado: Jogo{
+        estado: EstadoJogo{
             Jogadores: make(map[string]EstadoJogador),
         },
     }
@@ -66,8 +60,8 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
     case "register":
         if !existe {
             s.estado.Jogadores[comando.ClientID] = EstadoJogador{
-                X:               1, 
-                Y:               1,
+                PosX:               1, 
+                PosY:               1,
                 Vidas:           3,
                 UltimoComando: comando.SequenceNumber,
             }

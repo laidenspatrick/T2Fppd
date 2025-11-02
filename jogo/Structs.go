@@ -10,7 +10,7 @@ type Comando struct {
 
 // EstadoJogador representa a posição e vida de um jogador.
 type EstadoJogador struct {
-    X, Y          int
+    PosX, PosY          int
     Vidas         int
     UltimoComando int 
 }

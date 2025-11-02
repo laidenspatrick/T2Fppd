@@ -51,10 +51,6 @@ type Jogo struct {
     GameOver       bool 
 }
 
-type EstadoJogador struct {
-    PosX, PosY     int
-}
-
 // ------------------ ELEMENTOS VISUAIS ------------------
 var (
     Personagem = Elemento{'☺', CorCinzaEscuro, CorPadrao, true}
@@ -455,77 +451,4 @@ func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string)
             }
         })
     }
-}
-
-// personagemExecutarAcao processa o evento do teclado e envia o comando ao servidor.
-func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
-    if ev.Tipo == "mover" && (ev.Tecla == 'r' || ev.Tecla == 'R') {
-        withMapaLock(func() {
-            if jogo.GameOver {
-                if err := jogoReiniciar(jogo); err != nil {
-                    jogo.StatusMsg = "Falha ao reiniciar."
-                }
-            }
-        })
-        return true
-    }
-    if clienteRPC == nil {
-        return true
-    }
-
-    var comando Comando
-    
-    sequence++ 
-    
-    // 1. Criação do Comando RPC
-    switch ev.Tipo {
-    case "sair":
-        return false
-    case "mover":
-        dx, dy := 0, 0
-        switch ev.Tecla {
-        case 'w', 'W':
-            dy = -1
-        case 's', 'S':
-            dy = 1
-        case 'a', 'A':
-            dx = -1
-        case 'd', 'D':
-            dx = 1
-        }
-        nx, ny := jogo.PosX+dx, jogo.PosY+dy
-        if jogoPodeMoverPara(jogo, nx, ny) {
-            jogo.PosX, jogo.PosY = nx, ny
-        }
-        comando = Comando{
-            ClientID:       clientID,
-            SequenceNumber: sequence,
-            Acao:           "update_position",
-        }
-    case "interagir":
-        comando = Comando{
-            ClientID:       clientID,
-            SequenceNumber: sequence,
-            Acao:           "interact",
-        }
-    default:
-        return true
-    }
-
-    // 2. Chamada RPC (com reexecução em caso de falha)
-    var resposta Resposta
-    for tentativas := 0; tentativas < 3; tentativas++ {
-        err := clienteRPC.Call("JogoServer.ExecutarComando", comando, &resposta)
-        if err == nil {
-            break
-        }
-        time.Sleep(100 * time.Millisecond)
-    }
-
-    if resposta.Sucesso {
-        withMapaLock(func() {
-            jogo.StatusMsg = resposta.Mensagem
-        })
-    }
-    return true
 }
