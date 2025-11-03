@@ -43,9 +43,12 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
     s.mu.Lock()
     defer s.mu.Unlock()
 
-    fmt.Printf("[Servidor] REQ: %s, Cliente: %s, Seq: %d\n", comando.Acao, comando.ClientID, comando.SequenceNumber)
+    fmt.Printf("[Servidor] REQ: %s, Cliente: %s, Seq: %d, Detalhe: %s\n", 
+        comando.Acao, comando.ClientID, comando.SequenceNumber, comando.Detalhe)
 
     jogador, existe := s.estado.Jogadores[comando.ClientID]
+    
+    // 1. Garantia de Execução Única (Exactly-Once)
     if existe && comando.SequenceNumber <= jogador.UltimoComando {
         *resposta = Resposta{
             Sucesso:  true,
@@ -55,36 +58,71 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
         return nil 
     }
 
+    mensagemServidor := ""
+
     // 2. Execução do Comando e Atualização do Estado
     switch comando.Acao {
     case "register":
         if !existe {
             s.estado.Jogadores[comando.ClientID] = EstadoJogador{
-                PosX:               1, 
-                PosY:               1,
-                Vidas:           3,
+                X: 3, 
+                Y: 3,
+                Vidas: 3,
                 UltimoComando: comando.SequenceNumber,
             }
-            resposta.Mensagem = "Jogador registrado com sucesso."
+            mensagemServidor = "Jogador registrado com sucesso."
         }
+        
     case "update_position":
-        jogador.UltimoComando = comando.SequenceNumber
-        s.estado.Jogadores[comando.ClientID] = jogador
-        resposta.Mensagem = "Posição atualizada."
+        var newX, newY, newVidas int
+        
+        // Tenta ler o formato que inclui Vidas (usado após cair em armadilha, por exemplo)
+        // O cliente envia: "X:%d,Y:%d;VIDAS:%d"
+        _, errVidas := fmt.Sscanf(comando.Detalhe, "X:%d,Y:%d;VIDAS:%d", &newX, &newY, &newVidas)
 
-    case "interact":
+        if errVidas == nil {
+            // Sucesso na leitura de posição e vidas
+            jogador.Vidas = newVidas
+            jogador.X = newX
+            jogador.Y = newY
+            mensagemServidor = fmt.Sprintf("Posição e Vidas atualizadas: X=%d, Y=%d, Vidas=%d", newX, newY, newVidas)
+            
+        } else {
+            // Tenta ler o formato de movimento simples (apenas posição)
+            // O cliente envia: "X:%d,Y:%d"
+            if _, errPos := fmt.Sscanf(comando.Detalhe, "X:%d,Y:%d", &newX, &newY); errPos == nil {
+                // Sucesso na leitura da posição (vidas permanecem as mesmas)
+                jogador.X = newX
+                jogador.Y = newY
+                mensagemServidor = fmt.Sprintf("Posição atualizada: X=%d, Y=%d", newX, newY)
+            } else {
+                // Falha ao ler o formato, provavelmente um erro.
+                mensagemServidor = "Erro de formato no detalhe da posição. Posição não atualizada."
+                break // Sai do switch, mas mantém o sequence number (pode ser reenvio)
+            }
+        }
+        
+        // Aplica o último comando processado e atualiza o estado
         jogador.UltimoComando = comando.SequenceNumber
         s.estado.Jogadores[comando.ClientID] = jogador
-        resposta.Mensagem = "Interação registrada."
+        
+    case "interact":
+        // Este comando pode ser usado para interações que não são movimento (ex: usar item)
+        // Por enquanto, apenas atualizamos o sequence number
+        jogador.UltimoComando = comando.SequenceNumber
+        s.estado.Jogadores[comando.ClientID] = jogador
+        mensagemServidor = "Interação registrada."
+        
     }
 
+    // 3. Resposta final para o cliente
     *resposta = Resposta{
         Sucesso:  true,
+        Mensagem: mensagemServidor,
         EstadoAtual: s.estado,
     }
     return nil
 }
-
 // Inicia o Servidor RPC
 func IniciarServidor(porta string) {
     servidor := NovoJogoServer()

@@ -49,6 +49,7 @@ type Jogo struct {
     UltimoVisitado Elemento   
     StatusMsg      string      
     GameOver       bool 
+    Vidas          int
 }
 
 // ------------------ ELEMENTOS VISUAIS ------------------
@@ -406,8 +407,7 @@ func comportamentoArmadilha(armadilha *Armadilha, jogo *Jogo) {
 }
 
 // ------------------ FUNÇÕES CLIENTE MULTIPLAYER ------------------
-
-// loopAtualizacaoCliente é uma goroutine dedicada para buscar periodicamente
+// loopAtualizacaoCliente busca o estado do jogo no servidor periodicamente e atualiza o estado local.
 func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string) {
     ticker := time.NewTicker(200 * time.Millisecond)
     defer ticker.Stop()
@@ -431,24 +431,75 @@ func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string)
 
         err := clienteRPC.Call("JogoServer.BuscarEstado", comando, &resposta)
         if err != nil {
-            continue
+            // Se falhar, tenta novamente no próximo tick
+            continue 
         }
 
         withMapaLock(func() {
             jogo.StatusMsg = resposta.Mensagem
-            for clienteIDOutro, jogador := range resposta.EstadoAtual.Jogadores {
-                if clienteIDOutro != clientID {
-                    if jogador.PosY >= 0 && jogador.PosY < len(jogo.Mapa) &&
-                        jogador.PosX >= 0 && jogador.PosX < len(jogo.Mapa[jogador.PosY]) {
-                        jogo.Mapa[jogador.PosY][jogador.PosX] = Elemento{
-                            simbolo:  '☺',
-                            cor:      CorAzul,
-                            corFundo: CorPadrao,
-                            tangivel: true,
-                        }
+            
+            // 1. Limpa todos os outros jogadores da tela antes de redesenhar
+            jogoLimparJogadores(jogo)
+
+            // 2. Itera sobre a lista completa de jogadores fornecida pelo servidor
+            for outroID, jogadorEstado := range resposta.EstadoAtual.Jogadores {
+                
+                // 2a. Sincroniza o Estado do Jogador Local
+                if outroID == clientID {
+                    // O servidor é a fonte da verdade para Vidas/Posição.
+                    // ATUALIZAÇÃO CRÍTICA: Sincroniza as vidas e posição do jogador local.
+                    jogo.Vidas = jogadorEstado.Vidas
+                    jogo.PosX = jogadorEstado.X // A posição do jogador local é atualizada.
+                    jogo.PosY = jogadorEstado.Y
+
+                    // O loop de desenho principal (interfaceDesenharJogo) desenhará o jogador local.
+                    continue 
+                }
+
+                // 2b. Desenha Outros Jogadores
+                if jogadorEstado.Y >= 0 && jogadorEstado.Y < len(jogo.Mapa) &&
+                    jogadorEstado.X >= 0 && jogadorEstado.X < len(jogo.Mapa[jogadorEstado.Y]) {
+                    
+                    // Desenha o outro jogador (símbolo ☺)
+                    jogo.Mapa[jogadorEstado.Y][jogadorEstado.X] = Elemento{
+                        simbolo:  '☺',
+                        cor:      CorAzul,
+                        corFundo: CorPadrao,
+                        tangivel: true,
                     }
                 }
             }
+            // Chama a rotina de desenho para refletir as mudanças no mapa (outros jogadores)
+            interfaceDesenharJogo(jogo)
         })
     }
+}
+
+// ⚠️ Nota: Para a funcionalidade acima, você precisará de uma função jogoLimparJogadores 
+// que limpe os símbolos '☺' do mapa, senão eles ficam estáticos.
+func jogoLimparJogadores(jogo *Jogo) {
+    for y := 0; y < len(jogo.Mapa); y++ {
+        for x := 0; x < len(jogo.Mapa[y]); x++ {
+            // Limpa APENAS o símbolo do Outro Jogador '☺'
+            if jogo.Mapa[y][x].simbolo == '☺' { 
+                // Assumindo que o espaço vazio é ' ' ou '.'
+                jogo.Mapa[y][x].simbolo = ' ' 
+                jogo.Mapa[y][x].tangivel = false
+            }
+        }
+    }
+}
+
+func jogoEncontrarSaida(mapa [][]Elemento, x int, y int) (int, int) {
+    for row := 0; row < len(mapa); row++ {
+        for col := 0; col < len(mapa[row]); col++ {
+            // Verifica se é um portal ('#') e se não é a posição atual de entrada
+            if mapa[row][col].simbolo == '#' && (row != y || col != x) {
+                // Encontrada a saída. Retorna o destino.
+                return col, row
+            }
+        }
+    }
+    // Se, por algum motivo, não encontrar outro portal, retorna a posição atual (nenhum teleporte).
+    return x, y
 }

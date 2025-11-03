@@ -126,6 +126,7 @@ func personagemInteragir(jogo *Jogo) {
 
 // personagemExecutarAcao processa o evento do teclado e envia o comando ao servidor.
 func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
+    // Lógica de Reinício
     if ev.Tipo == "mover" && (ev.Tecla == 'r' || ev.Tecla == 'R') {
         withMapaLock(func() {
             if jogo.GameOver {
@@ -142,12 +143,19 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
 
     var comando Comando
     
+    // O Sequence Number deve ser incrementado ANTES de ser usado no comando.
     sequence++ 
     
-    // 1. Criação do Comando RPC
+    // Variáveis para armazenar o estado final e o detalhe
+    newX, newY := jogo.PosX, jogo.PosY // Inicia com a posição atual
+    acaoServidor := ""
+    detalheServidor := ""
+    
+    // 1. Criação e Lógica do Comando RPC
     switch ev.Tipo {
     case "sair":
         return false
+        
     case "mover":
         dx, dy := 0, 0
         switch ev.Tecla {
@@ -160,15 +168,51 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
         case 'd', 'D':
             dx = 1
         }
-        nx, ny := jogo.PosX+dx, jogo.PosY+dy
-        if jogoPodeMoverPara(jogo, nx, ny) {
-            jogo.PosX, jogo.PosY = nx, ny
+        
+        // Posição de destino após o input
+        newX, newY = jogo.PosX+dx, jogo.PosY+dy
+        
+        // 1a. Validação de Movimento (Limites e Paredes)
+        if jogoPodeMoverPara(jogo, newX, newY) {
+            
+            // 1b. Interação com Elementos (Armadilhas e Portais)
+            elemento := jogo.Mapa[newY][newX].simbolo
+
+            if elemento == '#' {
+                // LÓGICA DE PORTAL: Teletransporte imediato
+                destinoX, destinoY := jogoEncontrarSaida(jogo.Mapa, newX, newY)
+                newX = destinoX
+                newY = destinoY
+                acaoServidor = "update_position"
+                detalheServidor = fmt.Sprintf("X:%d,Y:%d", newX, newY)
+                
+            } else if elemento == '*' {
+                // LÓGICA DE ARMADILHA: Penalidade de vida
+                jogo.Vidas-- // Aplica a penalidade localmente
+                // O jogador permanece na armadilha na nova posição
+                acaoServidor = "update_position" 
+                detalheServidor = fmt.Sprintf("X:%d,Y:%d;VIDAS:%d", newX, newY, jogo.Vidas)
+                
+            } else {
+                // Movimento simples
+                acaoServidor = "update_position"
+                detalheServidor = fmt.Sprintf("X:%d,Y:%d", newX, newY)
+            }
+            
+            // 1c. Atualiza o estado local do jogador com o resultado final da lógica
+            jogo.PosX, jogo.PosY = newX, newY 
+        } else {
+            // Não pode mover, não envia comando
+            return true 
         }
+
         comando = Comando{
             ClientID:       clientID,
             SequenceNumber: sequence,
-            Acao:           "update_position",
+            Acao:           acaoServidor, 
+            Detalhe:        detalheServidor, // IMPORTANTE: Envia a posição final validada/teleportada
         }
+        
     case "interagir":
         comando = Comando{
             ClientID:       clientID,
