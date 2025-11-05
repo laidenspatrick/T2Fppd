@@ -105,7 +105,6 @@ func jogoNovo() Jogo {
     return Jogo{UltimoVisitado: Vazio}
 }
 
-// Lê um arquivo texto linha por linha e constrói o mapa do jogo
 func jogoCarregarMapa(nome string, jogo *Jogo) error {
     arq, err := os.Open(nome)
     if err != nil {
@@ -133,11 +132,11 @@ func jogoCarregarMapa(nome string, jogo *Jogo) error {
                 jogo.UltimoVisitado = Vazio
                 e = Vazio
             case 'P':
-                e = portal.Elemento 
+                e = Vazio
             case 'G':
                 e = Vazio
-            case 'A':  
-                e = armadilha.Elemento
+            case 'A':
+                e = Vazio
             case ' ':
                 e = Vazio
             default:
@@ -149,8 +148,8 @@ func jogoCarregarMapa(nome string, jogo *Jogo) error {
         jogo.Mapa = append(jogo.Mapa, linhaElems)
         y++
     }
-    
-    // 💡 NOVO: Inicializa MapaStatic (cópia profunda)
+
+    // Copia estática do mapa base
     jogo.MapaStatic = make([][]Elemento, len(jogo.Mapa))
     for i, row := range jogo.Mapa {
         jogo.MapaStatic[i] = make([]Elemento, len(row))
@@ -160,8 +159,10 @@ func jogoCarregarMapa(nome string, jogo *Jogo) error {
     if err := scanner.Err(); err != nil {
         return err
     }
+
     return nil
 }
+
 
 // Verifica se o personagem pode se mover para a posição (x, y)
 func jogoPodeMoverPara(jogo *Jogo, x, y int) bool {
@@ -321,8 +322,6 @@ func jogoReiniciar(jogo *Jogo) error {
     return nil
 }
 
-// ARMADILHA: reage a proximidade
-// ARMADILHA: reage à proximidade e muda de posição
 func comportamentoArmadilha(armadilha *Armadilha, jogo *Jogo) {
     withMapaLock(func() {
         armadilha.X, armadilha.Y = 6, 6

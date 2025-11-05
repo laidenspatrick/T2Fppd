@@ -58,6 +58,22 @@ func main() {
         panic(err)
     }
 
+    portal := NovoPortal()
+armadilha := NovaArmadilha()
+guarda := NovoGuarda()
+
+// define posições iniciais (fixas ou aleatórias, como preferir)
+portal.X, portal.Y = 5, 5
+armadilha.X, armadilha.Y = 10, 10
+guarda.X, guarda.Y = 2, 2
+
+// insere os elementos no mapa principal
+withMapaLock(func() {
+    jogo.Mapa[portal.Y][portal.X] = portal.Elemento
+    jogo.Mapa[armadilha.Y][armadilha.X] = armadilha.Elemento
+    jogo.Mapa[guarda.Y][guarda.X] = guarda.Elemento
+})
+
     // === INÍCIO DO BLOCO CRÍTICO: SINCRONIZAÇÃO PÓS-REGISTRO ===
     // O servidor define a posição de spawn (ex: 3, 3). O cliente deve adotar essa posição.
     if jogadorEstado, ok := resposta.EstadoAtual.Jogadores[clientID]; ok {
