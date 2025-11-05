@@ -4,9 +4,10 @@ package main
 import (
     "bufio"
     "math/rand"
+    "fmt"
+    "net/rpc"
     "os"
     "time"
-    "net/rpc" // Adicionado para rpc.Client
 )
 
 // ------------------ TIPOS BÁSICOS ------------------
@@ -45,6 +46,7 @@ type Armadilha struct {
 // Jogo contém o estado atual do jogo
 type Jogo struct {
     Mapa           [][]Elemento 
+    MapaStatic     [][]Elemento // 💡 NOVO: Cópia do mapa estático para redesenho
     PosX, PosY     int          
     UltimoVisitado Elemento   
     StatusMsg      string      
@@ -130,8 +132,12 @@ func jogoCarregarMapa(nome string, jogo *Jogo) error {
                 jogo.PosX, jogo.PosY = x, y
                 jogo.UltimoVisitado = Vazio
                 e = Vazio
-            case 'P', 'G', 'A':
+            case 'P':
+                e = portal.Elemento 
+            case 'G':
                 e = Vazio
+            case 'A':  
+                e = armadilha.Elemento
             case ' ':
                 e = Vazio
             default:
@@ -143,6 +149,14 @@ func jogoCarregarMapa(nome string, jogo *Jogo) error {
         jogo.Mapa = append(jogo.Mapa, linhaElems)
         y++
     }
+    
+    // 💡 NOVO: Inicializa MapaStatic (cópia profunda)
+    jogo.MapaStatic = make([][]Elemento, len(jogo.Mapa))
+    for i, row := range jogo.Mapa {
+        jogo.MapaStatic[i] = make([]Elemento, len(row))
+        copy(jogo.MapaStatic[i], row)
+    }
+
     if err := scanner.Err(); err != nil {
         return err
     }
@@ -190,6 +204,8 @@ func jogoTrocar(jogo *Jogo, x, y, nx, ny int) {
 }
 
 func comportamentoGuarda(guarda *Guarda, jogo *Jogo) {
+
+    guarda.Elemento = Elemento{'G', CorAmarelo, CorPadrao, true}
     withMapaLock(func() {
         guarda.X, guarda.Y = 2, 2
         if guarda.Y < 0 || guarda.Y >= len(jogo.Mapa) ||
@@ -242,8 +258,8 @@ func comportamentoGuarda(guarda *Guarda, jogo *Jogo) {
                 nx, ny := guarda.X+dx, guarda.Y+dy
                 if !(nx == jogo.PosX && ny == jogo.PosY) &&
                     ny >= 0 && ny < len(jogo.Mapa) && nx >= 0 && nx < len(jogo.Mapa[ny]) &&
-                    !jogo.Mapa[ny][nx].tangivel && jogo.Mapa[ny][nx].simbolo != portal.Elemento.simbolo {
-                    jogoTrocar(jogo, guarda.X, guarda.Y, nx, ny)
+                    !jogo.Mapa[ny][nx].tangivel && jogo.Mapa[ny][nx].simbolo != 'O' {
+                    jogo.Mapa[guarda.Y][guarda.X] = guarda.Elemento
                     guarda.X, guarda.Y = nx, ny
                     moved = true
                 }
@@ -256,7 +272,7 @@ func comportamentoGuarda(guarda *Guarda, jogo *Jogo) {
                 nx, ny := guarda.X+dx, guarda.Y+dy
                 if !(nx == jogo.PosX && ny == jogo.PosY) &&
                     ny >= 0 && ny < len(jogo.Mapa) && nx >= 0 && nx < len(jogo.Mapa[ny]) &&
-                    !jogo.Mapa[ny][nx].tangivel && jogo.Mapa[ny][nx].simbolo != portal.Elemento.simbolo {
+                    !jogo.Mapa[ny][nx].tangivel && jogo.Mapa[ny][nx].simbolo != 'O' {
                     jogoTrocar(jogo, guarda.X, guarda.Y, nx, ny)
                     guarda.X, guarda.Y = nx, ny
                     moved = true
@@ -268,74 +284,6 @@ func comportamentoGuarda(guarda *Guarda, jogo *Jogo) {
             time.Sleep(300 * time.Millisecond)
         } else {
             time.Sleep(120 * time.Millisecond)
-        }
-    }
-}
-
-// PORTAL: abre e fecha com timeout
-func comportamentoPortal(portal *Portal, jogo *Jogo) {
-    abrir := func() {
-        withMapaLock(func() {
-            portal.Ativo = true
-            if len(jogo.Mapa) > portal.Y && len(jogo.Mapa[portal.Y]) > portal.X {
-                jogo.Mapa[portal.Y][portal.X] = portal.Elemento
-            }
-            jogo.StatusMsg = "Um portal apareceu."
-        })
-    }
-    fechar := func(msg string) {
-        withMapaLock(func() {
-            portal.Ativo = false
-            if len(jogo.Mapa) > portal.Y && len(jogo.Mapa[portal.Y]) > portal.X {
-                jogo.Mapa[portal.Y][portal.X] = Vazio
-            }
-            jogo.StatusMsg = msg
-        })
-    }
-
-    withMapaLock(func() { portal.X, portal.Y = 4, 4 })
-    abrir()
-
-    inatividade := time.NewTimer(5 * time.Second)
-    resetar := func() {
-        if !inatividade.Stop() {
-            select {
-            case <-inatividade.C:
-            default:
-            }
-        }
-        inatividade.Reset(5 * time.Second)
-    }
-
-    for {
-        stop := false
-        withMapaLock(func() {
-            if jogo.GameOver {
-                stop = true
-            }
-        })
-        if stop {
-            return
-        }
-
-        if portal.Ativo {
-            select {
-            case <-portal.Teletransportar:
-                withMapaLock(func() { jogo.StatusMsg = "Você entrou no portal!" })
-                resetar()
-            case <-portal.PararTeletransporte:
-                fechar("O portal fechou!")
-                time.Sleep(8 * time.Second)
-                abrir()
-                resetar()
-            case <-inatividade.C:
-                fechar("O portal sumiu por inatividade.")
-                time.Sleep(8 * time.Second)
-                abrir()
-                resetar()
-            }
-        } else {
-            time.Sleep(100 * time.Millisecond)
         }
     }
 }
@@ -361,6 +309,7 @@ func jogoReiniciar(jogo *Jogo) error {
         PararArmadilha:     make(chan bool),
     }
     jogo.Mapa = nil
+    jogo.MapaStatic = nil // Limpa o mapa estático também
     jogo.UltimoVisitado = Vazio
     if err := jogoCarregarMapa("mapa.txt", jogo); err != nil {
         return err
@@ -373,13 +322,18 @@ func jogoReiniciar(jogo *Jogo) error {
 }
 
 // ARMADILHA: reage a proximidade
+// ARMADILHA: reage à proximidade e muda de posição
 func comportamentoArmadilha(armadilha *Armadilha, jogo *Jogo) {
     withMapaLock(func() {
         armadilha.X, armadilha.Y = 6, 6
-        if len(jogo.Mapa) > armadilha.Y && len(jogo.Mapa[armadilha.Y]) > armadilha.X {
-            jogo.Mapa[armadilha.Y][armadilha.X] = armadilha.Elemento
+        if armadilha.Y < len(jogo.Mapa) && armadilha.X < len(jogo.Mapa[armadilha.Y]) {
+            if jogo.Mapa[armadilha.Y][armadilha.X].simbolo == armadilha.Elemento.simbolo {
+                jogo.Mapa[armadilha.Y][armadilha.X] = Vazio
+            }
         }
     })
+
+    rand.Seed(time.Now().UnixNano())
 
     for {
         stop := false
@@ -394,14 +348,101 @@ func comportamentoArmadilha(armadilha *Armadilha, jogo *Jogo) {
 
         select {
         case <-armadilha.ProximidadeJogador:
-            withMapaLock(func() { jogo.StatusMsg = "Você caiu em uma armadilha!" })
+            // A mensagem é tratada no cliente (personagem.go)
         case <-armadilha.ProximidadeOutro:
             withMapaLock(func() { jogo.StatusMsg = "Outro elemento acionou a armadilha!" })
         case <-armadilha.PararArmadilha:
             withMapaLock(func() { jogo.StatusMsg = "A armadilha foi desativada." })
             return
         default:
-            time.Sleep(time.Second)
+            // MOVE A ARMADILHA ALEATORIAMENTE PELO MAPA
+            withMapaLock(func() {
+                altura := len(jogo.Mapa)
+                if altura == 0 {
+                    return
+                }
+                largura := len(jogo.Mapa[0])
+
+                for tentativas := 0; tentativas < 100; tentativas++ {
+                    x := rand.Intn(largura)
+                    y := rand.Intn(altura)
+                    elem := jogo.Mapa[y][x]
+                    if !elem.tangivel && elem.simbolo == ' ' {
+                        // Limpa posição anterior
+                        if armadilha.Y < len(jogo.Mapa) && armadilha.X < len(jogo.Mapa[armadilha.Y]) {
+                            jogo.Mapa[armadilha.Y][armadilha.X] = Vazio
+                        }
+                        // Move a armadilha
+                        armadilha.X, armadilha.Y = x, y
+                        jogo.Mapa[y][x] = armadilha.Elemento
+                        jogo.StatusMsg = fmt.Sprintf("⚠️ A armadilha se moveu para (%d, %d)!", x, y)
+                        break
+                    }
+                }
+            })
+
+            // Espera 5 segundos antes de mover de novo
+            time.Sleep(10 * time.Second)
+        }
+    }
+}
+
+func comportamentoPortal(portal *Portal, jogo *Jogo) {
+    // Define posição inicial do portal
+    withMapaLock(func() {
+        portal.X, portal.Y = 5, 5 // posição inicial arbitrária
+        if portal.Y < len(jogo.Mapa) && portal.X < len(jogo.Mapa[portal.Y]) {
+            if jogo.Mapa[portal.Y][portal.X].simbolo == portal.Elemento.simbolo {
+                jogo.Mapa[portal.Y][portal.X] = Vazio
+            }
+        }
+    })
+    rand.Seed(time.Now().UnixNano())
+
+    for {
+        stop := false
+        withMapaLock(func() {
+            if jogo.GameOver {
+                stop = true
+            }
+        })
+        if stop {
+            return
+        }
+
+        select {
+        case <-portal.PararTeletransporte:
+            withMapaLock(func() { jogo.StatusMsg = "Portal desativado." })
+            return
+        default:
+            // Escolhe nova posição aleatória no mapa
+            withMapaLock(func() {
+                altura := len(jogo.Mapa)
+                if altura == 0 {
+                    return
+                }
+                largura := len(jogo.Mapa[0])
+
+                for tentativas := 0; tentativas < 100; tentativas++ {
+                    x := rand.Intn(largura)
+                    y := rand.Intn(altura)
+                    elem := jogo.Mapa[y][x]
+                    if !elem.tangivel && elem.simbolo == ' ' {
+                        // Limpa posição anterior
+                        if portal.Y < len(jogo.Mapa) && portal.X < len(jogo.Mapa[portal.Y]) {
+                            jogo.Mapa[portal.Y][portal.X] = Vazio
+                        }
+                        // Move o portal
+                        portal.X, portal.Y = x, y
+                        jogo.Mapa[y][x] = portal.Elemento
+                        jogo.StatusMsg = fmt.Sprintf("⚡ O portal se moveu para (%d, %d)!", x, y)
+                        break
+                    }
+                }
+            })
+
+            // Espera antes de se mover novamente
+            time.Sleep(15 * time.Second)
         }
     }
 }
@@ -436,7 +477,10 @@ func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string)
         }
 
         withMapaLock(func() {
-            jogo.StatusMsg = resposta.Mensagem
+            // 💡 CORREÇÃO DE MENSAGENS: Apenas atualiza a mensagem se não for uma das mensagens padrão do servidor.
+            if resposta.Mensagem != "Estado atual enviado." && resposta.Mensagem != "Posição e Vidas atualizadas..." && resposta.Mensagem != "Posição atualizada..." {
+                jogo.StatusMsg = resposta.Mensagem
+            }
             
             // 1. Limpa todos os outros jogadores da tela antes de redesenhar
             jogoLimparJogadores(jogo)
@@ -447,12 +491,9 @@ func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string)
                 // 2a. Sincroniza o Estado do Jogador Local
                 if outroID == clientID {
                     // O servidor é a fonte da verdade para Vidas/Posição.
-                    // ATUALIZAÇÃO CRÍTICA: Sincroniza as vidas e posição do jogador local.
                     jogo.Vidas = jogadorEstado.Vidas
-                    jogo.PosX = jogadorEstado.X // A posição do jogador local é atualizada.
+                    jogo.PosX = jogadorEstado.X 
                     jogo.PosY = jogadorEstado.Y
-
-                    // O loop de desenho principal (interfaceDesenharJogo) desenhará o jogador local.
                     continue 
                 }
 
@@ -469,37 +510,63 @@ func loopAtualizacaoCliente(jogo *Jogo, clienteRPC *rpc.Client, clientID string)
                     }
                 }
             }
-            // Chama a rotina de desenho para refletir as mudanças no mapa (outros jogadores)
             interfaceDesenharJogo(jogo)
         })
     }
 }
 
-// ⚠️ Nota: Para a funcionalidade acima, você precisará de uma função jogoLimparJogadores 
-// que limpe os símbolos '☺' do mapa, senão eles ficam estáticos.
+// 💡 NOVO: Usa MapaStatic para restaurar o elemento de fundo original
 func jogoLimparJogadores(jogo *Jogo) {
     for y := 0; y < len(jogo.Mapa); y++ {
         for x := 0; x < len(jogo.Mapa[y]); x++ {
             // Limpa APENAS o símbolo do Outro Jogador '☺'
             if jogo.Mapa[y][x].simbolo == '☺' { 
-                // Assumindo que o espaço vazio é ' ' ou '.'
-                jogo.Mapa[y][x].simbolo = ' ' 
-                jogo.Mapa[y][x].tangivel = false
+                
+                // Restaura o elemento de fundo (P, A, Vazio, etc.) da cópia estática
+                if y < len(jogo.MapaStatic) && x < len(jogo.MapaStatic[y]) {
+                    jogo.Mapa[y][x] = jogo.MapaStatic[y][x] 
+                } else {
+                    jogo.Mapa[y][x] = Vazio // Fallback
+                }
+            }
+            // Limpa o Guarda (G) para que ele seja redesenhado na próxima posição
+            if jogo.Mapa[y][x].simbolo == guarda.Elemento.simbolo {
+                // Restaura o elemento de fundo (P, A, Vazio, etc.) da cópia estática
+                if y < len(jogo.MapaStatic) && x < len(jogo.MapaStatic[y]) {
+                    jogo.Mapa[y][x] = jogo.MapaStatic[y][x] 
+                } else {
+                    jogo.Mapa[y][x] = Vazio // Fallback
+                }
             }
         }
     }
 }
 
-func jogoEncontrarSaida(mapa [][]Elemento, x int, y int) (int, int) {
-    for row := 0; row < len(mapa); row++ {
-        for col := 0; col < len(mapa[row]); col++ {
-            // Verifica se é um portal ('#') e se não é a posição atual de entrada
-            if mapa[row][col].simbolo == '#' && (row != y || col != x) {
-                // Encontrada a saída. Retorna o destino.
-                return col, row
-            }
-        }
-    }
-    // Se, por algum motivo, não encontrar outro portal, retorna a posição atual (nenhum teleporte).
-    return x, y
+func jogoEncontrarSaida(mapa [][]Elemento, origemX, origemY int) (int, int) {
+	rand.Seed(time.Now().UnixNano())
+
+	altura := len(mapa)
+	if altura == 0 {
+		return origemX, origemY
+	}
+	largura := len(mapa[0])
+
+	for tentativas := 0; tentativas < 100; tentativas++ {
+		x := rand.Intn(largura)
+		y := rand.Intn(altura)
+
+		elem := mapa[y][x]
+
+		// A nova posição deve ser "vazia" (não tangível)
+		if !elem.tangivel && elem.simbolo == ' ' {
+			return x, y
+		}
+	}
+
+	// Se não encontrar posição segura após várias tentativas, retorna a origem
+	return origemX, origemY
 }
+
+//  $ go run cliente.go jogo.go Structs.go interface.go personagem.go
+// go build -o server_jogo server_jogo.go server.go Structs.go 
+// ./server_jogo

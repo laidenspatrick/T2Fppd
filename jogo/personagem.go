@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"time"
 )
 
@@ -15,108 +14,6 @@ func jogoMoverPersonagem(jogo *Jogo, dx, dy int) {
 	jogo.UltimoVisitado = jogo.Mapa[ny][nx]
 	// atualiza posição do jogador
 	jogo.PosX, jogo.PosY = nx, ny
-}
-
-// Move o personagem conforme a tecla (WASD)
-func personagemMover(tecla rune, jogo *Jogo) {
-	// bloqueia movimento após Game Over
-	stop := false
-	withMapaLock(func() {
-		if jogo.GameOver {
-			stop = true
-		}
-	})
-	if stop {
-		return
-	}
-
-	dx, dy := 0, 0
-	switch tecla {
-	case 'w', 'W':
-		dy = -1
-	case 'a', 'A':
-		dx = -1
-	case 's', 'S':
-		dy = 1
-	case 'd', 'D':
-		dx = 1
-	default:
-		return // ignora outras teclas
-	}
-
-	withMapaLock(func() {
-		nx, ny := jogo.PosX+dx, jogo.PosY+dy
-		// limites do mapa
-		if ny < 0 || ny >= len(jogo.Mapa) || nx < 0 || nx >= len(jogo.Mapa[ny]) {
-			return
-		}
-
-		elem := jogo.Mapa[ny][nx]
-
-		// Guarda: bloqueia
-		if elem.simbolo == guarda.Elemento.simbolo {
-			jogo.StatusMsg = "O guarda bloqueia o caminho!"
-			return
-		}
-
-		// Inimigo: bloqueia
-		if elem.simbolo == Inimigo.simbolo {
-			jogo.StatusMsg = "Um inimigo bloqueia o caminho!"
-			return
-		}
-
-		// Armadilha: marca Game Over e mostra mensagem normal (sem overlay)
-		if elem.simbolo == armadilha.Elemento.simbolo {
-			jogo.GameOver = true
-			jogo.StatusMsg = "GAME OVER — Pressione R para Reiniciar"
-			select {
-			case armadilha.ProximidadeJogador <- true:
-			default:
-			}
-			return
-		}
-
-		// Portal: teleporte aleatório para célula livre
-		if elem.simbolo == portal.Elemento.simbolo {
-			// notifica uso do portal (reinicia timeout)
-			select {
-			case portal.Teletransportar <- true:
-			default:
-			}
-
-			// coleta destinos livres (não tangíveis), exceto a própria célula atual
-			candidatos := make([][2]int, 0, 256)
-			for y := 0; y < len(jogo.Mapa); y++ {
-				for x := 0; x < len(jogo.Mapa[y]); x++ {
-					if !jogo.Mapa[y][x].tangivel && !(x == jogo.PosX && y == jogo.PosY) {
-						candidatos = append(candidatos, [2]int{x, y})
-					}
-				}
-			}
-			if len(candidatos) == 0 {
-				jogo.StatusMsg = "Portal falhou: sem destino livre."
-				return
-			}
-
-			rand.Seed(time.Now().UnixNano())
-			pick := candidatos[rand.Intn(len(candidatos))]
-			tx, ty := pick[0], pick[1]
-
-			// Teleporta: restaura célula atual, atualiza posição/UltimoVisitado
-			jogo.Mapa[jogo.PosY][jogo.PosX] = jogo.UltimoVisitado
-			jogo.PosX, jogo.PosY = tx, ty
-			jogo.UltimoVisitado = jogo.Mapa[jogo.PosY][jogo.PosX]
-
-			jogo.StatusMsg = fmt.Sprintf("Você entrou no portal e foi para (%d, %d).", tx, ty)
-			return
-		}
-
-		// Movimento normal se não for tangível
-		if elem.tangivel {
-			return
-		}
-		jogoMoverPersonagem(jogo, dx, dy)
-	})
 }
 
 // Define o que ocorre quando o jogador pressiona a tecla de interação
@@ -178,17 +75,32 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
             // 1b. Interação com Elementos (Armadilhas e Portais)
             elemento := jogo.Mapa[newY][newX].simbolo
 
-            if elemento == '#' {
+            if elemento == portal.Elemento.simbolo {
                 // LÓGICA DE PORTAL: Teletransporte imediato
                 destinoX, destinoY := jogoEncontrarSaida(jogo.Mapa, newX, newY)
+                withMapaLock(func() {
+                    jogo.StatusMsg = fmt.Sprintf("Entrou no portal! Teletransportado para (%d, %d)", destinoX, destinoY)
+                })
+                fmt.Printf("Portal ativado: (%d, %d) -> (%d, %d)\n", newX, newY, destinoX, destinoY)
                 newX = destinoX
                 newY = destinoY
                 acaoServidor = "update_position"
                 detalheServidor = fmt.Sprintf("X:%d,Y:%d", newX, newY)
                 
-            } else if elemento == '*' {
+            } else if elemento == armadilha.Elemento.simbolo {
                 // LÓGICA DE ARMADILHA: Penalidade de vida
-                jogo.Vidas-- // Aplica a penalidade localmente
+                jogo.Vidas-- 
+
+                withMapaLock(func() {
+                    jogo.StatusMsg = fmt.Sprintf("Caiu em armadilha! Vidas restantes: %d", jogo.Vidas)
+                })
+
+				if jogo.Vidas <= 0 {
+					jogo.GameOver = true
+					jogo.StatusMsg = "GAME OVER — Pressione R para Reiniciar"
+					// Não envia RPC de movimento se for Game Over
+					return true 
+				}
                 // O jogador permanece na armadilha na nova posição
                 acaoServidor = "update_position" 
                 detalheServidor = fmt.Sprintf("X:%d,Y:%d;VIDAS:%d", newX, newY, jogo.Vidas)
@@ -202,7 +114,6 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
             // 1c. Atualiza o estado local do jogador com o resultado final da lógica
             jogo.PosX, jogo.PosY = newX, newY 
         } else {
-            // Não pode mover, não envia comando
             return true 
         }
 
@@ -210,7 +121,7 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
             ClientID:       clientID,
             SequenceNumber: sequence,
             Acao:           acaoServidor, 
-            Detalhe:        detalheServidor, // IMPORTANTE: Envia a posição final validada/teleportada
+            Detalhe:        detalheServidor, 
         }
         
     case "interagir":
