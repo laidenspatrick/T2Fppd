@@ -119,7 +119,7 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
 
         comando = Comando{
             ClientID:       clientID,
-            SequenceNumber: sequence,
+            sequencenumber: sequence,
             Acao:           acaoServidor, 
             Detalhe:        detalheServidor, 
         }
@@ -127,7 +127,7 @@ func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
     case "interagir":
         comando = Comando{
             ClientID:       clientID,
-            SequenceNumber: sequence,
+            sequencenumber: sequence,
             Acao:           "interact",
         }
     default:

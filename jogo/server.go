@@ -44,12 +44,12 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
     defer s.mu.Unlock()
 
     fmt.Printf("[Servidor] REQ: %s, Cliente: %s, Seq: %d, Detalhe: %s\n", 
-        comando.Acao, comando.ClientID, comando.SequenceNumber, comando.Detalhe)
+        comando.Acao, comando.ClientID, comando.sequencenumber, comando.Detalhe)
 
     jogador, existe := s.estado.Jogadores[comando.ClientID]
     
     // 1. Garantia de Execução Única (Exactly-Once)
-    if existe && comando.SequenceNumber <= jogador.UltimoComando {
+    if existe && comando.sequencenumber <= jogador.UltimoComando {
         *resposta = Resposta{
             Sucesso:  true,
             Mensagem: "Comando já processado (retransmissão detectada).",
@@ -68,7 +68,7 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
                 X: 3, 
                 Y: 3,
                 Vidas: 3,
-                UltimoComando: comando.SequenceNumber,
+                UltimoComando: comando.sequencenumber,
             }
             mensagemServidor = "Jogador registrado com sucesso."
         }
@@ -98,11 +98,11 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
             }
         }
         
-        jogador.UltimoComando = comando.SequenceNumber
+        jogador.UltimoComando = comando.sequencenumber
         s.estado.Jogadores[comando.ClientID] = jogador
         
     case "interact":
-        jogador.UltimoComando = comando.SequenceNumber
+        jogador.UltimoComando = comando.sequencenumber
         s.estado.Jogadores[comando.ClientID] = jogador
         mensagemServidor = "Interação registrada."
         
