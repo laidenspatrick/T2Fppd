@@ -88,27 +88,20 @@ func (s *JogoServer) ExecutarComando(comando *Comando, resposta *Resposta) error
             mensagemServidor = fmt.Sprintf("Posição e Vidas atualizadas: X=%d, Y=%d, Vidas=%d", newX, newY, newVidas)
             
         } else {
-            // Tenta ler o formato de movimento simples (apenas posição)
-            // O cliente envia: "X:%d,Y:%d"
             if _, errPos := fmt.Sscanf(comando.Detalhe, "X:%d,Y:%d", &newX, &newY); errPos == nil {
-                // Sucesso na leitura da posição (vidas permanecem as mesmas)
                 jogador.X = newX
                 jogador.Y = newY
                 mensagemServidor = fmt.Sprintf("Posição atualizada: X=%d, Y=%d", newX, newY)
             } else {
-                // Falha ao ler o formato, provavelmente um erro.
                 mensagemServidor = "Erro de formato no detalhe da posição. Posição não atualizada."
-                break // Sai do switch, mas mantém o sequence number (pode ser reenvio)
+                break 
             }
         }
         
-        // Aplica o último comando processado e atualiza o estado
         jogador.UltimoComando = comando.SequenceNumber
         s.estado.Jogadores[comando.ClientID] = jogador
         
     case "interact":
-        // Este comando pode ser usado para interações que não são movimento (ex: usar item)
-        // Por enquanto, apenas atualizamos o sequence number
         jogador.UltimoComando = comando.SequenceNumber
         s.estado.Jogadores[comando.ClientID] = jogador
         mensagemServidor = "Interação registrada."

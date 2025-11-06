@@ -58,10 +58,6 @@ func main() {
         panic(err)
     }
 
-    portal := NovoPortal()
-armadilha := NovaArmadilha()
-guarda := NovoGuarda()
-
 // define posições iniciais (fixas ou aleatórias, como preferir)
 portal.X, portal.Y = 5, 5
 armadilha.X, armadilha.Y = 10, 10
@@ -79,7 +75,7 @@ withMapaLock(func() {
     if jogadorEstado, ok := resposta.EstadoAtual.Jogadores[clientID]; ok {
         jogo.PosX = jogadorEstado.X
         jogo.PosY = jogadorEstado.Y
-        jogo.Vidas = jogadorEstado.Vidas // Sincroniza vidas também, apenas por garantia.
+        jogo.Vidas = jogadorEstado.Vidas 
         log.Printf("Estado inicial sincronizado com o servidor: X=%d, Y=%d, Vidas=%d", jogo.PosX, jogo.PosY, jogo.Vidas)
     } else {
         log.Println("Aviso: Jogador não encontrado no estado retornado pelo servidor após o registro.")
@@ -101,6 +97,5 @@ withMapaLock(func() {
         if continuar := personagemExecutarAcao(evento, &jogo); !continuar {
             break
         }
-        // interfaceDesenharJogo é chamada pelo loopAtualizacaoCliente para evitar flashes.
     }
 }
